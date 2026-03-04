@@ -1,0 +1,7 @@
+{
+  "space": "062b96af-5c92-4889-a212-1bd5706812b5",
+  "startDate": "2023-07-01",
+  "openThreshold": 25,
+  "closeThreshold": 25,
+  "capacity": 3000
+}

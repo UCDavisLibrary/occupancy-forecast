@@ -1,0 +1,20 @@
+{
+  "name": "occupancy-forecast",
+  "version": "1.0.0",
+  "description": "Creates same-day occupancy profiles for libraries based on historical data",
+  "license": "ISC",
+  "author": "spelkey@ucdavis.edu",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "occupancy-forecast": "bin/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "dotenv": "^17.3.1",
+    "fast-csv": "^5.0.5"
+  }
+}
