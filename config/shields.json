@@ -3,5 +3,7 @@
   "startDate": "2023-07-01",
   "openThreshold": 25,
   "closeThreshold": 25,
-  "capacity": 3000
+  "capacity": 3000,
+  "reducedThreshold": 10,
+  "expandedThreshold": 18
 }

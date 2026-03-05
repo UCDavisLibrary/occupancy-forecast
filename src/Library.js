@@ -2,7 +2,8 @@ import { mkdir, writeFile } from 'fs/promises';
 import { writeToPath } from 'fast-csv';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
-import path from 'path';
+import math from './math.js';
+import path, { relative } from 'path';
 import util from 'util';
 
 import sensource from "./sensource.js";
@@ -14,33 +15,120 @@ export default class Library {
 
   constructor(options){
     
-    const requiredOptions = ['space', 'startDate', 'openThreshold', 'closeThreshold', 'capacity'];
+    const requiredOptions = [
+      'space', 'startDate', 'openThreshold', 'closeThreshold', 'capacity'
+    ];
     for ( const option of requiredOptions ){
       if ( options[option] === undefined ){
         throw new Error(`Missing required option: ${option}`);
       }
     }
 
-    this.space = options.space;
-    this.startDate = options.startDate;
-    this.openThreshold = parseInt(options.openThreshold);
-    this.closeThreshold = parseInt(options.closeThreshold);
-    this.capacity = parseInt(options.capacity);
+    this.options = {
+      space: options.space,
+      startDate: options.startDate,
+      openThreshold: parseInt(options.openThreshold),
+      closeThreshold: parseInt(options.closeThreshold),
+      capacity: parseInt(options.capacity),
+      reducedThreshold: options.reducedThreshold ? parseInt(options.reducedThreshold) : null,
+      expandedThreshold: options.expandedThreshold ? parseInt(options.expandedThreshold) : null
+    }
+    
     this.data = [];
     this.hours = [];
 
+    this.profileGroupings = ['weekday', 'scheduleType'];
+
     this.cacheDir = path.join(__dirname, '../data/cache');
     this.reportsDir = path.join(__dirname, '../data/reports');
+    this.profilesDir = path.join(__dirname, '../data/profiles');
   }
 
   async generate(){
     await this.getOccupancyData();
+
+    const output = {
+      config: this.options,
+      profiles: []
+    }
+
+    const data = this.data.filter(d => d.isOpen);
+    const uniqueValues = {};
+    for ( const grouping of this.profileGroupings ){
+      uniqueValues[grouping] = [...new Set(data.map(d => d[grouping]))].filter(v => v !== null && v !== undefined);
+    }
+    const profileGroupings = math.combinations(this.profileGroupings);
+    for ( const grouping of profileGroupings ){
+      const uniqueCombos = math.cartesianProductObjects(
+        grouping.reduce((acc, key) => {
+          if (key in uniqueValues) {
+            acc[key] = uniqueValues[key];
+          }
+          return acc;
+        }, {})
+      );
+      for ( const combo of uniqueCombos ){
+        const profileData = data.filter(d => {
+          for ( const key in combo ){
+            if ( d[key] !== combo[key] ) return false;
+          }
+          return true;
+        });
+        const profile = {
+          grouping: combo,
+          periodsFromOpen: [],
+          periodsToClose: []
+        }
+
+        for ( const row of profileData ){
+          for ( const metric of ['periodsFromOpen', 'periodsToClose'] ){
+            if ( row[metric] !== null && row[metric] !== undefined ){
+              let d = profile[metric].find(d => d.period === row[metric]);
+              if ( !d ){
+                d = {
+                  period: row[metric],
+                  relativeOccupancy: []
+                }
+                profile[metric].push(d);
+              }
+              d.relativeOccupancy.push(row.relativeOccupancy);
+            }
+          }
+        }
+
+        for ( const metric of ['periodsFromOpen', 'periodsToClose'] ){
+          profile[metric] = profile[metric].map(d => {
+            d.relativeOccupancy.sort((a, b) => a - b);
+
+            d.median = math.median(d.relativeOccupancy, true);
+            d.count = d.relativeOccupancy.length;
+            d.percentiles = {
+              p10: math.percentile(d.relativeOccupancy, 0.1, true),
+              p25: math.percentile(d.relativeOccupancy, 0.25, true),
+              p75: math.percentile(d.relativeOccupancy, 0.75, true),
+              p90: math.percentile(d.relativeOccupancy, 0.9, true)
+            }
+            delete d.relativeOccupancy;
+            return d;
+          });
+          profile[metric].sort((a, b) => a.period - b.period);
+        }
+
+        output.profiles.push(profile);
+      }
+    }
+
+    await mkdir(this.profilesDir, { recursive: true });
+    const outputPath = `${this.profilesDir}/profiles_${this.options.space}.json`;
+    await writeFile(outputPath, JSON.stringify(output, null, 2), 'utf-8');
+    console.log('Generated profiles saved to', outputPath);
+  
   }
 
   async getOccupancyData(){
     await mkdir(this.cacheDir, { recursive: true });
 
-    const dateChunks = this.chunkByCalendarHalfYears(this.startDate);
+    const dateChunks = this.chunkByCalendarHalfYears(this.options.startDate);
     const promises = dateChunks.map(({start, end}) => this._getChunkOccupancyData(start, end));
     await Promise.all(promises);
 
@@ -63,7 +151,7 @@ export default class Library {
       row.date = new Date(row.recordDate_minute_30);
       row.avgoccupancy = Math.round(parseFloat(row.avgoccupancy));
       row.localDate = this.getLocalDateParts(row.date);
-      row.relativeOccupancy = Math.round((row.avgoccupancy / this.capacity) * 100);
+      row.relativeOccupancy = Math.round((row.avgoccupancy / this.options.capacity) * 100);
     });
 
     this.data.forEach(row => this.setHours(row));
@@ -74,13 +162,14 @@ export default class Library {
 
   async exportHours(){
     await mkdir(this.reportsDir, { recursive: true });
-    const path = `${this.reportsDir}/hours_${this.space}.csv`;
+    const path = `${this.reportsDir}/hours_${this.options.space}.csv`;
     const d = this.hours.map(h => {
       return {
         date: h.date,
         weekday: h.weekday,
         open: h.open ? h.open.localDate.dt : null,
-        close: h.close ? h.close.localDate.dt : null
+        close: h.close ? h.close.localDate.dt : null,
+        scheduleType: h.scheduleType
       }
     });
     return new Promise((resolve, reject) => {
@@ -90,8 +179,34 @@ export default class Library {
     });
   }
 
+  /**
+   * @description Determines the schedule type (reduced, normal, expanded, summer) based on open/close times and configured thresholds
+   * @param {Object} open - The open time data object from this.hours
+   * @param {Object} close - The close time data object from this.hours
+   * @returns {string|null} - The schedule type or null if not determined
+   */
+  getScheduleType(open, close){
+    if ( !(open && close) ) return null;
+    const hoursBetween = math.getIntervalCountBetweenDates(open.date, close.date, 60);
+
+    if ( this.options.expandedThreshold && hoursBetween >= this.options.expandedThreshold ){
+      return 'expanded';
+    }
+
+    const summerStart = new Date(`${open.localDate.year}-06-10T00:00:00`);
+    const summerEnd = new Date(`${open.localDate.year}-09-22T00:00:00`);
+    if ( open.date >= summerStart && open.date <= summerEnd ){
+      return 'summer';
+    }
+    if ( this.options.reducedThreshold && hoursBetween <= this.options.reducedThreshold ){
+      return 'reduced';
+    } else {
+      return 'normal';
+    }
+  }
+
   setHours(row){
-    let open, close;
+    let open, close, scheduleType;
     const nextDayBuffer = 10; // look at 10 rows (5 hours) of data from the next day to find close time, since some libraries may close after midnight
     let businessDate = row.localDate.date;
     let weekday = row.localDate.weekday;
@@ -112,29 +227,28 @@ export default class Library {
       tomorrow = this.getLocalDateParts(tomorrow).date;
       const tomorrowDateData = this.data.filter(d => d.localDate.date === tomorrow);
       const hours = [...currentDateData, ...tomorrowDateData.slice(0, nextDayBuffer)];
-      open = hours.find(h => h.sumins >= this.openThreshold);
-      close = [...hours].reverse().find(h => h.sumouts >= this.closeThreshold);
+      open = hours.find(h => h.sumins >= this.options.openThreshold);
+      close = [...hours].reverse().find(h => h.sumouts >= this.options.closeThreshold);
       this.hours.push({
         date: businessDate,
         weekday,
         open: open ? {...open} : null,
-        close: close ? {...close} : null
+        close: close ? {...close} : null,
+        scheduleType: this.getScheduleType(open, close)
       });
     } else {
       open = exists.open;
       close = exists.close;
+      scheduleType = exists.scheduleType;
     }
 
     row.businessDate = businessDate;
     row.isOpen = open && close ? (row.date >= open.date && row.date <= close.date) : null;
-    row.periodsFromOpen = open ? this.getIntervalCountBetweenDates(open.date, row.date) : null;
-    row.periodsToClose = close ? this.getIntervalCountBetweenDates(row.date, close.date) : null;
+    row.periodsFromOpen = open ? math.getIntervalCountBetweenDates(open.date, row.date) : null;
+    row.periodsToClose = close ? math.getIntervalCountBetweenDates(row.date, close.date) : null;
+    row.weekday = weekday;
+    row.scheduleType = scheduleType;
 
-  }
-
-  getIntervalCountBetweenDates(start, end, intervalMinutes=30){
-    const absoluteDiffInSeconds = Math.abs((end.getTime() - start.getTime()) / 1000);
-    return Math.ceil(absoluteDiffInSeconds / (intervalMinutes * 60));
   }
 
   /**
@@ -165,7 +279,7 @@ export default class Library {
   }
 
   async _getChunkOccupancyData(start, end){
-    const cacheFileName = `occupancy_${this.space}_${start}_${end || 'present'}.json`;
+    const cacheFileName = `occupancy_${this.options.space}_${start}_${end || 'present'}.json`;
     const cacheFilePath = path.join(this.cacheDir, cacheFileName);
     let data = [];
 
@@ -174,7 +288,7 @@ export default class Library {
       data = JSON.parse(readFileSync(cacheFilePath, 'utf-8'));
     } else {
       data = await sensource.getOccupancyData({
-        entityIds: this.space,
+        entityIds: this.options.space,
         startDate: start,
         endDate: end,
         dateGroupings: 'minute(30)',

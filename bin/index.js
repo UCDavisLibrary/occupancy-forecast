@@ -18,10 +18,13 @@ const program = new Command();
 
 function applySharedOptions(cmd) {
   return cmd
-    .option('--space <space>', 'Sensource space ID')
+    .option('--space <space>', 'Sensource space ID. See spaces command for available spaces')
     .option('--startDate <startDate>', 'Start date to retrieve historical data from (YYYY-MM-DD). Will round to nearest half-year, so 2024-03-01 would round to 2024-01-01, and 2024-09-01 would round to 2024-07-01)')
     .option('--openThreshold <openThreshold>', 'Threshold to determine if the library is considered open based on number of people entering')
     .option('--closeThreshold <closeThreshold>', 'Threshold to determine if the library is considered closed based on number of people leaving')
+    .option('--capacity <capacity>', 'Maximum capacity of the library (used to determine reduced/expanded schedule types)')
+    .option('--reducedThreshold <reducedThreshold>', 'Threshold in hours between open and close to consider a reduced schedule (e.g. if library is open for less than 10 hours, it is considered a reduced schedule)')
+    .option('--expandedThreshold <expandedThreshold>', 'Threshold in hours between open and close to consider an expanded schedule (e.g. if library is open for more than 18 hours, it is considered an expanded schedule)')
     .option('--config <path>', 'Path to config file')
 }
 
