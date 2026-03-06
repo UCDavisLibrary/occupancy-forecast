@@ -1,9 +1,10 @@
 import { Command } from 'commander';
-import util from 'util';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import Library from '../src/Library.js';
+import Evaluation from '../src/Evaluation.js';
+import utils from '../src/utils.js';
 
 import sensource from '../src/sensource.js';
 
@@ -26,11 +27,6 @@ function applySharedOptions(cmd) {
     .option('--reducedThreshold <reducedThreshold>', 'Threshold in hours between open and close to consider a reduced schedule (e.g. if library is open for less than 10 hours, it is considered a reduced schedule)')
     .option('--expandedThreshold <expandedThreshold>', 'Threshold in hours between open and close to consider an expanded schedule (e.g. if library is open for more than 18 hours, it is considered an expanded schedule)')
     .option('--config <path>', 'Path to config file')
-}
-
-
-function logObject(data){
-  console.log(util.inspect(data, { showHidden: false, depth: null, colors: true }));
 }
 
 function mergeOptionsWithConfig(options){
@@ -62,7 +58,7 @@ program
   .description('List available Sensource spaces')
   .action(async () => {
     const spaces = await sensource.getSpaces();
-    logObject(spaces);
+    utils.prettyPrint(spaces);
   });
 
 applySharedOptions( program.command('hours') )
@@ -73,6 +69,19 @@ applySharedOptions( program.command('hours') )
     const library = new Library(options);
     await library.getOccupancyData();
     await library.exportHours();
+  });
+
+program
+  .command('evaluate')
+  .description('Evaluate the accuracy of the generated profiles against specified date range')
+  .requiredOption('-p, --profilePath <path>', 'Path to generated profile JSON file to evaluate')
+  .requiredOption('-l, --libcalLocationId <libcalLocationId>', 'Libcal location ID to retrieve hours for evaluation. Found in libcal admin under Admin -> Hours -> Libraries')
+  .requiredOption('-s, --startDate <startDate>', 'Start date for evaluation (YYYY-MM-DD)')
+  .requiredOption('-e, --endDate <endDate>', 'End date for evaluation (YYYY-MM-DD)')
+  .action(async (options) => {
+    options.profilePath = resolve(process.cwd(), options.profilePath);
+    const evaluation = new Evaluation(options);
+    await evaluation.evaluate();
   });
 
 

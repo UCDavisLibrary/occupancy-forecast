@@ -3,7 +3,7 @@ import { writeToPath } from 'fast-csv';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
 import math from './math.js';
-import path, { relative } from 'path';
+import path from 'path';
 import util from 'util';
 
 import sensource from "./sensource.js";
@@ -129,7 +129,7 @@ export default class Library {
     await mkdir(this.cacheDir, { recursive: true });
 
     const dateChunks = this.chunkByCalendarHalfYears(this.options.startDate);
-    const promises = dateChunks.map(({start, end}) => this._getChunkOccupancyData(start, end));
+    const promises = dateChunks.map(({start, end}) => this.getChunkOccupancyData(start, end));
     await Promise.all(promises);
 
     // Remove duplicates (Sensource may return overlapping data for adjacent chunks)
@@ -141,7 +141,11 @@ export default class Library {
       }
     }
     this.data = Array.from(byTimestamp.values());
+    this.parseData();
+    this.data.forEach(row => this.setHours(row));
+  }
 
+  parseData(){
     this.data = this.data.filter(row => !row.recordError);
 
     // sort by date
@@ -153,11 +157,8 @@ export default class Library {
       row.localDate = this.getLocalDateParts(row.date);
       row.relativeOccupancy = Math.round((row.avgoccupancy / this.options.capacity) * 100);
     });
-
-    this.data.forEach(row => this.setHours(row));
     //console.log(util.inspect(this.hours.slice(-2), { showHidden: false, depth: null, colors: true }))
     //console.log(util.inspect(this.data.slice(-24), { showHidden: false, depth: null, colors: true }))
-
   }
 
   async exportHours(){
@@ -205,6 +206,11 @@ export default class Library {
     }
   }
 
+  /**
+   * @description Attempt to estimate open/close times for a given data row based on configured entry/exit thresholds.
+   * This definitely introduces error, but we don't have historical open/close times
+   * @param {*} row 
+   */
   setHours(row){
     let open, close, scheduleType;
     const nextDayBuffer = 10; // look at 10 rows (5 hours) of data from the next day to find close time, since some libraries may close after midnight
@@ -278,7 +284,7 @@ export default class Library {
     return dateParts;
   }
 
-  async _getChunkOccupancyData(start, end){
+  async getChunkOccupancyData(start, end){
     const cacheFileName = `occupancy_${this.options.space}_${start}_${end || 'present'}.json`;
     const cacheFilePath = path.join(this.cacheDir, cacheFileName);
     let data = [];
