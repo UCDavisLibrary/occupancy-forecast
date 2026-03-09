@@ -78,6 +78,8 @@ program
   .requiredOption('-l, --libcalLocationId <libcalLocationId>', 'Libcal location ID to retrieve hours for evaluation. Found in libcal admin under Admin -> Hours -> Libraries')
   .requiredOption('-s, --startDate <startDate>', 'Start date for evaluation (YYYY-MM-DD)')
   .requiredOption('-e, --endDate <endDate>', 'End date for evaluation (YYYY-MM-DD)')
+  .option('--startPeriod <startPeriod>', 'When to start predicting occupancy for a given day')
+  .option('--minimumSampleSize <minimumSampleSize>', 'Minimum number of data points required to attempt to predict occupancy for a given day')
   .action(async (options) => {
     options.profilePath = resolve(process.cwd(), options.profilePath);
     const evaluation = new Evaluation(options);

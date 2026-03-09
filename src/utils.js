@@ -125,6 +125,35 @@ class Utils {
     const summerEnd = new Date(`${year}-09-22T00:00:00Z`);
     return date >= summerStart && date <= summerEnd;
   }
-}
 
+  objectsMatch(obj1, obj2){
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+    if (keys1.length !== keys2.length) {
+      return false;
+    }
+    for (const key of keys1) {
+      if (obj1[key] !== obj2[key]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * @description Creates a new object containing only the specified keys from the original object.
+   * @param {Object} obj - The original object
+   * @param {string[]} keys - The keys to include in the new object
+   * @returns {Object} - The new object containing only the specified keys
+   */
+  subsetObject(obj, keys){
+    return keys.reduce((acc, key) => {
+      if (key in obj) {
+        acc[key] = obj[key];
+      }
+      return acc;
+    }, {})
+  }
+
+}
 export default new Utils();
