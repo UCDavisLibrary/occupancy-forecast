@@ -2,6 +2,10 @@ import util from 'util';
 
 class Utils {
 
+  /**
+   * @description Pretty-prints data to the console.
+   * @param {*} data - The data to print.
+   */
   prettyPrint(data){
     console.log(util.inspect(data, { showHidden: false, depth: null, colors: true }));
   }
@@ -79,6 +83,11 @@ class Utils {
     return slots;
   }
 
+  /**
+   * @description Returns the next day after the given ISO date.
+   * @param {string} isoDate - The ISO date string.
+   * @returns {string} The ISO date string for the next day.
+   */
   nextDay(isoDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
       throw new Error(`Invalid ISO date: ${isoDate}`);
@@ -94,6 +103,11 @@ class Utils {
     return date.toISOString().slice(0, 10);
   }
 
+  /**
+   * @description Returns the short name of the weekday for the given ISO date.
+   * @param {string} isoDate - The ISO date string.
+   * @returns {string} The short name of the weekday.
+   */
   getWeekdayShort(isoDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
       throw new Error(`Invalid ISO date: ${isoDate}`);
@@ -110,6 +124,11 @@ class Utils {
     }).format(date);
   }
 
+  /**
+   * @description Determines if the given ISO date falls roughly within the summer quarter.
+   * @param {string} isoDate - The ISO date string.
+   * @returns {boolean} True if the date falls within the summer quarter, false otherwise.
+   */
   isSummerQuarter(isoDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
       throw new Error(`Invalid ISO date: ${isoDate}`);
@@ -126,6 +145,12 @@ class Utils {
     return date >= summerStart && date <= summerEnd;
   }
 
+  /**
+   * @description Determines if two objects have the same values for all their keys.
+   * @param {Object} obj1 - The first object.
+   * @param {Object} obj2 - The second object.
+   * @returns {boolean} True if the objects have the same values for all keys, false otherwise.
+   */
   objectsMatch(obj1, obj2){
     const keys1 = Object.keys(obj1);
     const keys2 = Object.keys(obj2);

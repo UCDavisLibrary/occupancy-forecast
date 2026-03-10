@@ -68,6 +68,12 @@ class MathUtils {
     return Math.round(v);
   }
 
+  average(values){
+    if (values.length === 0) return 0;
+    const sum = values.reduce((a, b) => a + b, 0);
+    return sum / values.length;
+  }
+
   weightedAverage(values, weights){
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
     if (totalWeight === 0) return 0;

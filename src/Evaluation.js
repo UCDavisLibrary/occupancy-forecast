@@ -11,6 +11,9 @@ import math from './math.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * @description Class for evaluating the accuracy of occupancy predictions based on historical data and library hours.
+ */
 export default class Evaluation {
 
   constructor(options){
@@ -41,6 +44,16 @@ export default class Evaluation {
     this.data = [];
   }
 
+  /**
+   * @description Main method to run the evaluation process:
+   * 1. Read generated profiles from file
+   * 2. Retrieve library hours from Libcal API
+   * 3. Construct evaluation dataset by matching library hours with occupancy data
+   * 4. Predict occupancy for each period based on profile hierarchy and calculate error
+   * 5. Calculate T+1 error for each period based on occupancy at start period
+   * 6. Export hourly data and summary statistics to CSV files
+   * @returns {Promise<void>}
+   */
   async evaluate(){
     await this.readProfiles();
     await this.getHours();
@@ -50,8 +63,12 @@ export default class Evaluation {
     this.constructData();
     this.calculateTOneError();
     await this.exportHourlyData();
+    await this.exportSummary();
   }
 
+  /**
+   * @description Reads the JSON occupancy profiles (created by the 'generate' cli command) and stores them in the instance for use in evaluation.
+   */
   async readProfiles(){
     const contents = JSON.parse(readFileSync(this.options.profilePath, 'utf-8'));
     this.profiles = contents.profiles;
@@ -59,6 +76,9 @@ export default class Evaluation {
     utils.prettyPrint(this.profileConfig);
   }
 
+  /**
+   * @description Retrieves library hours from Libcal API for the specified date range and location, with caching to avoid redundant API calls.
+   */
   async getHours(){
     const cacheFileName = `hours_${this.options.libcalLocationId}_${this.options.startDate}_${this.options.endDate}.json`;
     const cacheFilePath = path.join(this.cacheDir, cacheFileName);
@@ -69,7 +89,7 @@ export default class Evaluation {
     } else {
       data = await libcal.getHours(this.options.libcalLocationId, this.options.startDate, this.options.endDate);
       await mkdir(this.cacheDir, { recursive: true });
-      await writeFile(cacheFilePath, JSON.stringify(data), 'utf-8');
+      await writeFile(cacheFilePath, JSON.stringify(data, null, 2), 'utf-8');
     }
 
     this.hours = data[0].dates;
@@ -82,6 +102,11 @@ export default class Evaluation {
     // utils.prettyPrint(this.hours);
   }
 
+  /**
+   * @description Merges the library hours data with the occupancy data to construct a dataset for evaluation. 
+   * For each day in the specified date range, it identifies the open periods based on the library hours and matches them with the corresponding occupancy data. 
+   * It then predicts occupancy for each period based on the profile hierarchy and calculates the error compared to actual occupancy.
+   */
   async constructData(){
     let data = [];
     for ( const [day, status] of Object.entries(this.hours) ){
@@ -142,6 +167,11 @@ export default class Evaluation {
     //utils.prettyPrint(this.data.slice(-2));
   }
 
+  /**
+   * @description Predicts occupancy for a specific period based on the profile hierarchy.
+   * @param {Object} day - The day object from this.data
+   * @param {number} periodIndex - The index of the period for which to predict occupancy
+   */
   predictPeriodOccupancy(day, periodIndex){
     const thisPeriod = day.occupancy[periodIndex];
     if ( periodIndex < this.options.startPeriod ){
@@ -176,6 +206,9 @@ export default class Evaluation {
     }
   }
 
+  /**
+   * @description Predict occupancy and error for entire day based on the occupancy at the start period
+   */
   calculateTOneError(){
     for ( const day of this.data ){
       const tOneScale = day.occupancy?.[this.options.startPeriod]?.scale || 1;
@@ -224,6 +257,42 @@ export default class Evaluation {
     return null;
   }
 
+  /**
+   * @description Exports summary statistics of the evaluation for each day to a CSV file
+   */
+  async exportSummary(){
+    const rows = this.data.map(day => {
+      const errors = day.occupancy.map(p => p.error).filter(e => e !== null && e !== undefined);
+      const tOneErrors = day.occupancy.map(p => p.tOneError).filter(e => e !== null && e !== undefined);
+      return {
+        date: day.dateString,
+        weekday: day.weekday,
+        scheduleType: day.scheduleType,
+        open: day.hours?.[0]?.open || null,
+        close: day.hours?.[0]?.close || null,
+        averageError: errors.length ? math.toTwoDecimalPlaces(math.average(errors)) : null,
+        medianError: errors.length ? math.toTwoDecimalPlaces(math.median(errors)) : null,
+        maxError: errors.length ? math.toTwoDecimalPlaces(Math.max(...errors)) : null,
+        minError: errors.length ? math.toTwoDecimalPlaces(Math.min(...errors)) : null,
+        p25Error: errors.length ? math.toTwoDecimalPlaces(math.percentile(errors, 0.25)) : null,
+        p75Error: errors.length ? math.toTwoDecimalPlaces(math.percentile(errors, 0.75)) : null,
+        averageTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.average(tOneErrors)) : null,
+        medianTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.median(tOneErrors)) : null,
+        maxTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(Math.max(...tOneErrors)) : null,
+        minTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(Math.min(...tOneErrors)) : null,
+        p25TOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.percentile(tOneErrors, 0.25)) : null,
+        p75TOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.percentile(tOneErrors, 0.75)) : null
+      };
+    });
+    const dir = path.join(this.reportsDir, 'summary', `${this.options.libcalLocationId}`);
+    await mkdir(dir, { recursive: true });
+    const filepath = `${dir}/${this.options.startDate}_${this.options.endDate}.csv`;
+    await writeToPath(filepath, rows, { headers: true });
+  }
+
+  /**
+   * @description Exports the hourly evaluation data for each period to a CSV file.
+   */
   async exportHourlyData(){
     const rows = [];
     for ( const day of this.data ){
@@ -246,9 +315,10 @@ export default class Evaluation {
         });
       }
     }
-    await mkdir(this.reportsDir, { recursive: true });
-    const path = `${this.reportsDir}/evaluation_${this.options.libcalLocationId}_${this.options.startDate}_${this.options.endDate}.csv`;
-    await writeToPath(path, rows, { headers: true });
+    const dir = path.join(this.reportsDir, 'hourly', `${this.options.libcalLocationId}`);
+    await mkdir(dir, { recursive: true });
+    const filepath = `${dir}/${this.options.startDate}_${this.options.endDate}.csv`;
+    await writeToPath(filepath, rows, { headers: true });
   }
 
 }

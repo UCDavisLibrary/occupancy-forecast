@@ -4,13 +4,15 @@ import { fileURLToPath } from 'url';
 import { existsSync, readFileSync } from 'fs';
 import math from './math.js';
 import path from 'path';
-import util from 'util';
 
 import sensource from "./sensource.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * @description Class for generating same-day occupancy profiles for a library based on historical data.
+ */
 export default class Library {
 
   constructor(options){
@@ -44,6 +46,13 @@ export default class Library {
     this.profilesDir = path.join(__dirname, '../data/profiles');
   }
 
+  /**
+   * @description Main method to run the profile generation process:
+   * 1. Retrieve occupancy data from Sensource API (with caching)
+   * 2. Parse and preprocess the data (filter errors, calculate relative occupancy, etc.)
+   * 3. Estimate open/close times for each day based on entry/exit thresholds
+   * 4. Generate occupancy profiles based on configured groupings and save to file
+   */
   async generate(){
     await this.getOccupancyData();
 
@@ -125,6 +134,11 @@ export default class Library {
   
   }
 
+  /**
+   * @description Retrieves occupancy data from Sensource API for the specified space and date range, with caching to avoid redundant API calls.
+     * The data is retrieved in chunks of half-years to manage API limits and potential timeouts. 
+     * After retrieving the data, data are processed
+   */
   async getOccupancyData(){
     await mkdir(this.cacheDir, { recursive: true });
 
@@ -145,6 +159,14 @@ export default class Library {
     this.data.forEach(row => this.setHours(row));
   }
 
+  /**
+   * @description Parses and preprocesses the raw occupancy data retrieved from Sensource API.
+   * - Filters out rows with record errors
+   * - Sorts data by date
+   * - Calculates relative occupancy as a percentage of capacity
+   * - Extracts local date parts (year, month, day, hour, weekday) in the library's timezone for further analysis
+   * - Estimates open/close times for each day based on entry/exit thresholds and assigns schedule types
+   */
   parseData(){
     this.data = this.data.filter(row => !row.recordError);
 
@@ -161,6 +183,9 @@ export default class Library {
     //console.log(util.inspect(this.data.slice(-24), { showHidden: false, depth: null, colors: true }))
   }
 
+  /**
+   * @description Exports the estimated library hours for each day to a CSV file in the reports directory
+   */
   async exportHours(){
     await mkdir(this.reportsDir, { recursive: true });
     const path = `${this.reportsDir}/hours_${this.options.space}.csv`;
@@ -284,6 +309,12 @@ export default class Library {
     return dateParts;
   }
 
+  /**
+   * @description Retrieves occupancy data from Sensource API for the specified space and date range, with caching to avoid redundant API calls.
+   * @param {string} start - The start date for the data retrieval.
+   * @param {string} end - The end date for the data retrieval.
+   * @returns {Promise<void>}
+   */
   async getChunkOccupancyData(start, end){
     const cacheFileName = `occupancy_${this.options.space}_${start}_${end || 'present'}.json`;
     const cacheFilePath = path.join(this.cacheDir, cacheFileName);
@@ -301,12 +332,17 @@ export default class Library {
         relativeDate: 'custom'
       });
       console.log(`Caching occupancy data to file: ${cacheFileName}`);
-      await writeFile(cacheFilePath, JSON.stringify(data), 'utf-8');
+      await writeFile(cacheFilePath, JSON.stringify(data, null, 2), 'utf-8');
     }
 
     this.data.push(...data);
   }
 
+  /**
+   * @description Chunks the date range into half-year intervals for API data retrieval.
+   * @param {string} isoStart - The start date in ISO format.
+   * @returns {Array} An array of date ranges representing each half-year chunk.
+   */
   chunkByCalendarHalfYears(isoStart) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(isoStart)) {
       throw new Error(`Invalid ISO date: ${isoStart}`);
