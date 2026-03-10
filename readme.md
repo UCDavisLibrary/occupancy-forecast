@@ -1,19 +1,15 @@
 # Library Occupancy Modeling and Evaluation
 
-A Node.js CLI tool that generates same-day occupancy forecasts for libraries by building statistical profiles from historical foot-traffic sensor data.
+A Node.js CLI tool that generates same-day occupancy forecasts for UC Davis libraries by building statistical profiles from historical foot-traffic sensor data (from vendor Sensource).
 
-## Features
+## Primary Features
 
-- **Occupancy profiles** – builds median and percentile (p10, p25, p75, p90) relative-occupancy curves for each day-of-week and schedule-type combination from historical Sensource data.
-- **Open/close estimation** – derives library open and close times automatically from entry/exit sensor counts when no historical schedule is available.
-- **Schedule classification** – labels each day as *reduced*, *normal*, *expanded*, or *summer* based on configurable hour thresholds.
-- **Accuracy evaluation** – compares profile predictions against actual Libcal hours and reports hourly and summary error metrics.
-- **API caching** – stores raw Sensource responses locally so repeat runs don't re-fetch the same data.
-- **CSV and JSON reports** – exports estimated hours and generated profiles to `data/reports/` and `data/profiles/`.
+- **Occupancy profiles** – builds median and percentile (p10, p25, p75, p90) relative-occupancy curves for each day-of-week and schedule-type (*reduced*, *normal*, *expanded*, or *summer*) combination from historical Sensource data.
+- **Accuracy evaluation** – compares profile predictions against actual Libcal hours and Sensource occupancy and reports hourly and summary error metrics.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or later
+- NodeJs. Tested on v24.4
 - Sensource API credentials (OAuth 2.0 client ID and secret)
 - Libcal API credentials (OAuth 2.0 client ID and secret) — required for the `evaluate` command only
 
@@ -35,7 +31,7 @@ npm install -g .
 
 ### Environment variables
 
-Create a `.env` file in the project root (this file is git-ignored):
+Create a `.env` file in the project root:
 
 ```env
 SENSOURCE_CLIENT_ID=your_sensource_client_id
@@ -43,6 +39,10 @@ SENSOURCE_CLIENT_SECRET=your_sensource_client_secret
 LIBCAL_CLIENT_ID=your_libcal_client_id
 LIBCAL_CLIENT_SECRET=your_libcal_client_secret
 ```
+
+Sensource credentials can be retrieved from `https://vea.sensourceinc.com/#/login`
+
+Libcal credentials can be retrieved from `https://reservations.library.ucdavis.edu/admin/api/authentication`. Required scope is `Hours - Read`
 
 ### Config file (optional)
 
@@ -66,6 +66,14 @@ Instead of passing every flag on the command line you can supply a JSON config f
 occupancy-forecast <command> [options]
 ```
 
+or
+
+```
+node ./bin/index.js  <command> [options]
+```
+
+For any command you can add the `-h` flag for a list of options.
+
 ### `spaces`
 
 List all Sensource spaces available to the configured credentials.
@@ -74,32 +82,12 @@ List all Sensource spaces available to the configured credentials.
 occupancy-forecast spaces
 ```
 
+This will tell you the Sensource spaceId for the Library you want to generate a prediction model for.
+
 ### `generate`
 
-Build same-day occupancy profiles from historical data and save them to `data/profiles/`.
+The main command for this package. Builds same-day occupancy profiles from historical data and save them to `data/profiles/`.
 
-```bash
-occupancy-forecast generate \
-  --space <spaceId> \
-  --startDate <YYYY-MM-DD> \
-  --openThreshold <n> \
-  --closeThreshold <n> \
-  --capacity <n> \
-  [--reducedThreshold <hours>] \
-  [--expandedThreshold <hours>] \
-  [--config <path/to/config.json>]
-```
-
-| Option | Description |
-|---|---|
-| `--space` | Sensource space UUID. Use `spaces` command to find it. |
-| `--startDate` | Earliest date to pull historical data from (`YYYY-MM-DD`). Rounded down to the most recent half-year boundary (Jan 1 or Jul 1). |
-| `--openThreshold` | Minimum cumulative entries in a 30-minute window to consider the library open. |
-| `--closeThreshold` | Minimum cumulative exits in a 30-minute window to consider the library closed. |
-| `--capacity` | Total seating/person capacity; used to compute relative-occupancy percentages. |
-| `--reducedThreshold` | Hours open below which a day is classified as *reduced* schedule. |
-| `--expandedThreshold` | Hours open at or above which a day is classified as *expanded* schedule. |
-| `--config` | Path to a JSON config file. |
 
 **Example:**
 
@@ -109,42 +97,21 @@ occupancy-forecast generate --config config/shields.json
 
 ### `hours`
 
-Export estimated open/close times for every day in the historical range to a CSV file in `data/reports/`.
+Export estimated open/close times for every day in the historical range to a CSV file in `data/reports/`. Good for evaluating hours estimate accuracy before running the generate command.
 
 ```bash
-occupancy-forecast hours \
-  --space <spaceId> \
-  --startDate <YYYY-MM-DD> \
-  --openThreshold <n> \
-  --closeThreshold <n> \
-  --capacity <n> \
-  [--config <path/to/config.json>]
+occupancy-forecast hours --config config/shields.json
 ```
-
-Accepts the same options as `generate`. The CSV contains `date`, `weekday`, `open`, `close`, and `scheduleType` columns.
 
 ### `evaluate`
 
 Compare profile predictions against actual Libcal hours for a date range and print accuracy metrics.
 
-```bash
-occupancy-forecast evaluate \
-  --profilePath <path/to/profiles_<spaceId>.json> \
-  --libcalLocationId <id> \
-  --startDate <YYYY-MM-DD> \
-  --endDate <YYYY-MM-DD> \
-  [--startPeriod <hours>] \
-  [--minimumSampleSize <n>]
-```
+**Example:**
 
-| Option | Description |
-|---|---|
-| `-p, --profilePath` | Path to the profile JSON file produced by `generate`. |
-| `-l, --libcalLocationId` | Libcal location ID. Found in Libcal admin under **Admin → Hours → Libraries**. |
-| `-s, --startDate` | Start of the evaluation window (`YYYY-MM-DD`). |
-| `-e, --endDate` | End of the evaluation window (`YYYY-MM-DD`). |
-| `--startPeriod` | Hour of day from which to begin predicting occupancy. |
-| `--minimumSampleSize` | Minimum data points required before attempting a prediction for a given day. |
+```
+node ./bin/index.js evaluate -p ./data/profiles/profiles_062b96af-5c92-4889-a212-1bd5706812b5.json -s 2026-03-05 -e 2026-03-10 -l 18170
+```
 
 ## Output
 
@@ -152,7 +119,7 @@ All output is written inside a `data/` directory that is created automatically a
 
 ```
 data/
-├── cache/        # Raw Sensource API responses (JSON) — prevents redundant API calls
+├── cache/        # Raw Sensource and Libcal API responses (JSON) — prevents redundant API calls
 ├── profiles/     # Generated occupancy profile files — profiles_<spaceId>.json
 └── reports/      # Exported CSV files — hours_<spaceId>.csv
 ```
@@ -179,13 +146,18 @@ Each profile JSON file contains the configuration used to generate it and an arr
 ```
 
 - `period` – number of 30-minute intervals from the estimated open time (`periodsFromOpen`) or until the estimated close time (`periodsToClose`).
-- `median` / `percentiles` – relative occupancy as a percentage of `capacity`.
+- `median` / `percentiles` – relative occupancy as a percentage of `capacity` for the library.
+
+See `Evaluation.js` for an example of how to use the profiles to predict occupancy for a given day. The basic procedure is:
+1. Compute the scale for each 30 minute bucket you have data for so far in the day: `scale = (Σ y_b * p_b) / (Σ p_b^2)` where `p_b` is the typical profile value at time bucket b, and `y_b` is today’s observed value at that same bucket
+2. For each bucket you want to select the best matching profile with a sufficient sample size e.g. if `[tuesday, summer]` doesn't have enough observations, fall back to `[tuesday]`
+3. For the rest of the buckets get the forecast with `forecast_b = scale * p_b`
 
 ## How it works
 
-1. **Data retrieval** – Sensource occupancy data is fetched in half-year chunks and cached locally.
+1. **Data retrieval** – Historical Sensource occupancy data is fetched to generate profiles (requests are automatically chunked and cached for performance)
 2. **Preprocessing** – Records with sensor errors are removed; relative occupancy (`avgoccupancy / capacity × 100`) is computed for each 30-minute interval.
-3. **Open/close estimation** – For each calendar day the first interval where cumulative entries exceed `openThreshold` is treated as open, and the last interval where cumulative exits exceed `closeThreshold` is treated as close.
+3. **Open/close estimation** – For each calendar day the first interval where cumulative entries exceed `openThreshold` is treated as open, and the last interval where cumulative exits exceed `closeThreshold` is treated as close. This introduces error, but it appears to be manageable, and we don't have historical business hour ranges.
 4. **Schedule classification** – Each day is labelled *expanded*, *summer*, *reduced*, or *normal* based on hours-open and configured thresholds.
 5. **Profile generation** – Days are grouped by weekday and schedule type. Relative occupancy at each period distance from open (and to close) is aggregated into median and percentile statistics.
 6. **Prediction** – During evaluation a profile hierarchy (`[weekday + scheduleType] → [weekday] → [scheduleType]`) is tried in order, falling back to broader groupings when a specific combination lacks sufficient data.
