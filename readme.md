@@ -69,7 +69,7 @@ occupancy-forecast <command> [options]
 or
 
 ```
-node ./bin/index.js  <command> [options]
+./bin/index.js  <command> [options]
 ```
 
 For any command you can add the `-h` flag for a list of options.
@@ -110,7 +110,7 @@ Compare profile predictions against actual Libcal hours for a date range and pri
 **Example:**
 
 ```
-node ./bin/index.js evaluate -p ./data/profiles/profiles_062b96af-5c92-4889-a212-1bd5706812b5.json -s 2026-03-05 -e 2026-03-10 -l 18170
+./bin/index.js evaluate -p ./data/profiles/profiles_062b96af-5c92-4889-a212-1bd5706812b5.json -s 2026-03-05 -e 2026-03-10 -l 18170
 ```
 
 ## Output

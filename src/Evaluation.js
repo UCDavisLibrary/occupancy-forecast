@@ -36,7 +36,11 @@ export default class Evaluation {
       this.options.minimumSampleSize = 10; // minimum number of data points required to attempt to predict occupancy for a given day
     }
 
-    this.profileHierarchy = [['weekday', 'scheduleType'], ['weekday'], ['scheduleType']];
+    if ( !options.movingWindowSize ){
+      this.options.movingWindowSize = 6;
+    }
+
+    this.profileHierarchy = [['weekday', 'scheduleType'], ['scheduleType'], ['weekday']];
 
     this.cacheDir = path.join(__dirname, '../data/cache');
     this.reportsDir = path.join(__dirname, '../data/reports');
@@ -137,13 +141,14 @@ export default class Evaluation {
             period.periodsToClose = periodsToClose;
             const [hour, minute] = period.time.split(':');
 
-            const occupancy = this.library.data.find(r =>
+            const sensourceData = this.library.data.find(r =>
               r.localDate.hour === hour &&
               r.localDate.minute === minute &&
               (period.isNextDay ? r.localDate.date === d.nextDateString : r.localDate.date === d.dateString)
-            )?.relativeOccupancy || null;
+            );
 
-            period.occupancy = occupancy;
+            period.occupancy = sensourceData?.relativeOccupancy;
+            period.sensource = sensourceData;
 
             periodsFromOpen++;
             periodsToClose--;
@@ -155,11 +160,13 @@ export default class Evaluation {
         data.push(d);
       }
     }
-    data = data.filter(d => d.occupancy.every(p => p.occupancy !== null));
+    // utils.prettyPrint(data.slice(-3));
+    data = data.filter(d => d.occupancy.every(p => p.occupancy !== null && p.occupancy !== undefined));
 
     for ( const day of data ){
       for ( let i = 0; i < day.occupancy.length; i++ ){
         this.predictPeriodOccupancy(day, i);
+        this.predictPeriodOccupancy(day, i, this.options.movingWindowSize);
       }
     }
 
@@ -172,15 +179,28 @@ export default class Evaluation {
    * @param {Object} day - The day object from this.data
    * @param {number} periodIndex - The index of the period for which to predict occupancy
    */
-  predictPeriodOccupancy(day, periodIndex){
+  predictPeriodOccupancy(day, periodIndex, windowSize){
+
+    const periodProp = (prop) => {
+      return windowSize ? `${prop}Window${windowSize}` : prop;
+    }
+
+    const setPeriodProp = (period, prop, value) => {
+      period[periodProp(prop)] = value;
+    }
+
     const thisPeriod = day.occupancy[periodIndex];
     if ( periodIndex < this.options.startPeriod ){
-      thisPeriod.predictedOccupancy = null;
+      setPeriodProp(thisPeriod, 'predictedOccupancy', null);
       return;
     }
     let scaleNumerator = 0;
     let scaleDenominator = 0;
-    for ( const period of day.occupancy.slice(0, periodIndex) ){
+    let previousPeriods = day.occupancy.slice(0, periodIndex);
+    if ( windowSize ){
+      previousPeriods = previousPeriods.slice(-windowSize);
+    }
+    for ( const period of previousPeriods ){
       const profileOccupancy = this.getProfileOccupancy(day, period.periodsFromOpen);
       period.profileOccupancy = profileOccupancy.occupancy;
       period.profile = profileOccupancy.profile;
@@ -197,12 +217,12 @@ export default class Evaluation {
       thisPeriod.predictedOccupancy = null;
       return;
     }
-    thisPeriod.scale = math.toTwoDecimalPlaces((scaleDenominator ? scaleNumerator / scaleDenominator : 1));
-    thisPeriod.predictedOccupancy = math.toTwoDecimalPlaces(thisPeriod.scale * profileOccupancy.occupancy);
+    setPeriodProp(thisPeriod, 'scale', math.toTwoDecimalPlaces((scaleDenominator ? scaleNumerator / scaleDenominator : 1)));
+    setPeriodProp(thisPeriod, 'predictedOccupancy', math.toTwoDecimalPlaces(thisPeriod[periodProp('scale')] * profileOccupancy.occupancy));
     thisPeriod.profile = profileOccupancy.profile;
     thisPeriod.profileOccupancy = profileOccupancy.occupancy;
-    if ( thisPeriod.predictedOccupancy ) {
-      thisPeriod.error = math.toTwoDecimalPlaces(Math.abs(thisPeriod.predictedOccupancy - thisPeriod.occupancy));
+    if ( thisPeriod[periodProp('predictedOccupancy')] ) {
+      thisPeriod[periodProp('error')] = math.toTwoDecimalPlaces(Math.abs(thisPeriod[periodProp('predictedOccupancy')] - thisPeriod.occupancy));
     }
   }
 
@@ -241,13 +261,25 @@ export default class Evaluation {
       const profileClose = profile.periodsToClose.find(p => p.period === period.periodsToClose);
       const profileMedians = [];
       const profileWeights = [];
-      for ( const p of [profileOpen, profileClose] ){
-        const ct = p?.count || 0;
-        if ( ct >= this.options.minimumSampleSize ){
-          profileMedians.push(p.median);
-          profileWeights.push(ct);
+      const threshold = 5; // how close to open/close should the period be to use just the fromOpen/toClose profile value, rather than weighting average of both
+      if ( period.periodsFromOpen <= threshold && profileOpen?.count >= this.options.minimumSampleSize ){
+        profileMedians.push(profileOpen.median);
+        profileWeights.push(profileOpen.count);
+      } 
+      if ( period.periodsToClose <= threshold && profileClose?.count >= this.options.minimumSampleSize ){
+        profileMedians.push(profileClose.median);
+        profileWeights.push(profileClose.count);
+      } 
+      if (!profileMedians.length ) {
+        for ( const p of [profileOpen, profileClose] ){
+          const ct = p?.count || 0;
+          if ( ct >= this.options.minimumSampleSize ){
+            profileMedians.push(p.median);
+            profileWeights.push(ct);
+          }
         }
       }
+
       if ( !profileMedians.length ) continue;
       return {
         occupancy: math.toTwoDecimalPlaces(math.weightedAverage(profileMedians, profileWeights)),
@@ -264,6 +296,7 @@ export default class Evaluation {
     const rows = this.data.map(day => {
       const errors = day.occupancy.map(p => p.error).filter(e => e !== null && e !== undefined);
       const tOneErrors = day.occupancy.map(p => p.tOneError).filter(e => e !== null && e !== undefined);
+      const windowErrors = day.occupancy.map(p => p[`errorWindow${this.options.movingWindowSize}`]).filter(e => e !== null && e !== undefined);
       return {
         date: day.dateString,
         weekday: day.weekday,
@@ -276,6 +309,12 @@ export default class Evaluation {
         minError: errors.length ? math.toTwoDecimalPlaces(Math.min(...errors)) : null,
         p25Error: errors.length ? math.toTwoDecimalPlaces(math.percentile(errors, 0.25)) : null,
         p75Error: errors.length ? math.toTwoDecimalPlaces(math.percentile(errors, 0.75)) : null,
+        averageWindowError: windowErrors.length ? math.toTwoDecimalPlaces(math.average(windowErrors)) : null,
+        medianWindowError: windowErrors.length ? math.toTwoDecimalPlaces(math.median(windowErrors)) : null,
+        maxWindowError: windowErrors.length ? math.toTwoDecimalPlaces(Math.max(...windowErrors)) : null,
+        minWindowError: windowErrors.length ? math.toTwoDecimalPlaces(Math.min(...windowErrors)) : null,
+        p25WindowError: windowErrors.length ? math.toTwoDecimalPlaces(math.percentile(windowErrors, 0.25)) : null,
+        p75WindowError: windowErrors.length ? math.toTwoDecimalPlaces(math.percentile(windowErrors, 0.75)) : null,
         averageTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.average(tOneErrors)) : null,
         medianTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(math.median(tOneErrors)) : null,
         maxTOneError: tOneErrors.length ? math.toTwoDecimalPlaces(Math.max(...tOneErrors)) : null,
@@ -286,7 +325,7 @@ export default class Evaluation {
     });
     const dir = path.join(this.reportsDir, 'summary', `${this.options.libcalLocationId}`);
     await mkdir(dir, { recursive: true });
-    const filepath = `${dir}/${this.options.startDate}_${this.options.endDate}.csv`;
+    const filepath = `${dir}/summary_${this.options.startDate}_${this.options.endDate}.csv`;
     await writeToPath(filepath, rows, { headers: true });
   }
 
@@ -309,6 +348,9 @@ export default class Evaluation {
           profile: JSON.stringify(period.profile),
           error: period.error,
           scale: period.scale,
+          windowPredictedOccupancy: period[`predictedOccupancyWindow${this.options.movingWindowSize}`],
+          windowError: period[`errorWindow${this.options.movingWindowSize}`],
+          windowScale: period[`scaleWindow${this.options.movingWindowSize}`],
           tOneError: period.tOneError,
           tOnePredicted: period.tOnePredicted,
           profileOccupancy: period.profileOccupancy
@@ -317,7 +359,7 @@ export default class Evaluation {
     }
     const dir = path.join(this.reportsDir, 'hourly', `${this.options.libcalLocationId}`);
     await mkdir(dir, { recursive: true });
-    const filepath = `${dir}/${this.options.startDate}_${this.options.endDate}.csv`;
+    const filepath = `${dir}/hourly_${this.options.startDate}_${this.options.endDate}.csv`;
     await writeToPath(filepath, rows, { headers: true });
   }
 
